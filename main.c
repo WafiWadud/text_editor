@@ -1,25 +1,8 @@
+#include "editor.h"
 #include <ncurses.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-typedef struct {
-  char **lines;
-  size_t *line_len;
-  int num_lines;
-  int capacity;
-} Buffer;
-
-typedef struct {
-  int cx, cy;
-  int rowoff, coloff;
-} Cursor;
-
-typedef struct {
-  Buffer buffer;
-  Cursor cursor;
-  const char *filename;
-} Editor;
 
 static void buffer_init(Buffer *buf, int initial_capacity) {
   buf->lines = malloc(initial_capacity * sizeof(char *));
@@ -96,15 +79,18 @@ static void show_message(const char *msg) {
 static void redraw(const Editor *ed) {
   clear();
 
+  /* Render each visible line, adjusting for vertical scrolling */
   for (int i = 0; i < LINES && (i + ed->cursor.rowoff) < ed->buffer.num_lines;
        i++) {
     char *line = ed->buffer.lines[i + ed->cursor.rowoff];
 
+    /* Only print if line extends beyond the horizontal scroll offset */
     if ((int)ed->buffer.line_len[i + ed->cursor.rowoff] > ed->cursor.coloff) {
       mvprintw(i, 0, "%.*s", COLS, &line[ed->cursor.coloff]);
     }
   }
 
+  /* Position cursor accounting for viewport offset */
   move(ed->cursor.cy - ed->cursor.rowoff, ed->cursor.cx - ed->cursor.coloff);
   refresh();
 }
@@ -113,23 +99,25 @@ static void clamp_cursor(Editor *ed) {
   Cursor *c = &ed->cursor;
   const Buffer *buf = &ed->buffer;
 
+  /* Clamp vertical position to valid line range */
   if (c->cy < 0)
     c->cy = 0;
   if (c->cy >= buf->num_lines)
     c->cy = buf->num_lines - 1;
 
+  /* Clamp horizontal position to valid column range (including end of line) */
   if (c->cx < 0)
     c->cx = 0;
   if (c->cx > (int)buf->line_len[c->cy])
     c->cx = buf->line_len[c->cy];
 
-  /* Vertical scrolling */
+  /* Adjust vertical scrolling offset to keep cursor visible */
   if (c->cy < c->rowoff)
     c->rowoff = c->cy;
   if (c->cy >= c->rowoff + LINES)
     c->rowoff = c->cy - LINES + 1;
 
-  /* Horizontal scrolling */
+  /* Adjust horizontal scrolling offset to keep cursor visible */
   if (c->cx < c->coloff)
     c->coloff = c->cx;
   if (c->cx >= c->coloff + COLS)
@@ -141,8 +129,11 @@ static void insert_char(Editor *ed, int ch) {
   Cursor *c = &ed->cursor;
 
   char *line = buf->lines[c->cy];
+  /* Resize line to accommodate new character plus null terminator */
   line = realloc(line, buf->line_len[c->cy] + 2);
+  /* Shift characters to the right to make room for new character */
   memmove(&line[c->cx + 1], &line[c->cx], buf->line_len[c->cy] - c->cx + 1);
+  /* Insert the character and move cursor forward */
   line[c->cx++] = ch;
   buf->lines[c->cy] = line;
   buf->line_len[c->cy]++;
@@ -153,7 +144,7 @@ static void backspace(Editor *ed) {
   Cursor *c = &ed->cursor;
 
   if (c->cx > 0) {
-    /* Normal backspace inside line */
+    /* Normal backspace inside line - remove character before cursor */
     char *line = buf->lines[c->cy];
     memmove(&line[c->cx - 1], &line[c->cx], buf->line_len[c->cy] - c->cx + 1);
     buf->line_len[c->cy]--;
@@ -167,16 +158,20 @@ static void backspace(Editor *ed) {
 
   int prev_len = buf->line_len[c->cy - 1];
 
+  /* Resize previous line to hold both lines' content */
   buf->lines[c->cy - 1] =
       realloc(buf->lines[c->cy - 1], prev_len + buf->line_len[c->cy] + 1);
 
+  /* Append current line content to previous line */
   memcpy(&buf->lines[c->cy - 1][prev_len], buf->lines[c->cy],
          buf->line_len[c->cy] + 1);
 
   buf->line_len[c->cy - 1] += buf->line_len[c->cy];
 
+  /* Remove the now-empty current line */
   delete_line(buf, c->cy);
 
+  /* Move cursor to end of merged line */
   c->cy--;
   c->cx = prev_len;
 }
@@ -186,7 +181,7 @@ static void delete_at_cursor(Editor *ed) {
   Cursor *c = &ed->cursor;
 
   if (c->cx < (int)buf->line_len[c->cy]) {
-    /* Normal delete inside line */
+    /* Normal delete inside line - remove character at cursor */
     memmove(&buf->lines[c->cy][c->cx], &buf->lines[c->cy][c->cx + 1],
             buf->line_len[c->cy] - c->cx);
     buf->line_len[c->cy]--;
@@ -197,14 +192,17 @@ static void delete_at_cursor(Editor *ed) {
   if (c->cy + 1 >= buf->num_lines)
     return;
 
+  /* Resize current line to hold both lines' content */
   buf->lines[c->cy] = realloc(
       buf->lines[c->cy], buf->line_len[c->cy] + buf->line_len[c->cy + 1] + 1);
 
+  /* Append next line content to current line */
   memcpy(&buf->lines[c->cy][buf->line_len[c->cy]], buf->lines[c->cy + 1],
          buf->line_len[c->cy + 1] + 1);
 
   buf->line_len[c->cy] += buf->line_len[c->cy + 1];
 
+  /* Remove the now-empty next line */
   delete_line(buf, c->cy + 1);
 }
 
@@ -212,30 +210,31 @@ static void insert_newline(Editor *ed) {
   Buffer *buf = &ed->buffer;
   Cursor *c = &ed->cursor;
 
+  /* Ensure buffer has room for one more line */
   buffer_ensure_capacity(buf, buf->num_lines + 1);
 
   char *line = buf->lines[c->cy];
 
-  /* Right-hand side after cursor */
+  /* Save the right-hand side (after cursor) for the new line */
   char *right = strdup(&line[c->cx]);
 
-  /* Truncate current line at cursor */
+  /* Truncate current line at cursor position */
   line[c->cx] = '\0';
   buf->lines[c->cy] = realloc(line, c->cx + 1);
   buf->line_len[c->cy] = c->cx;
 
-  /* Make room for new line */
+  /* Make room for new line by shifting existing lines down */
   memmove(&buf->lines[c->cy + 2], &buf->lines[c->cy + 1],
           (buf->num_lines - c->cy - 1) * sizeof(char *));
   memmove(&buf->line_len[c->cy + 2], &buf->line_len[c->cy + 1],
           (buf->num_lines - c->cy - 1) * sizeof(size_t));
 
-  /* Insert new line */
+  /* Insert new line with right-hand content */
   buf->lines[c->cy + 1] = right;
   buf->line_len[c->cy + 1] = strlen(right);
   buf->num_lines++;
 
-  /* Move cursor */
+  /* Move cursor to beginning of new line */
   c->cy++;
   c->cx = 0;
 }
@@ -254,9 +253,11 @@ static int load_file(Editor *ed, const char *filename) {
   size_t len = 0;
   ssize_t read;
 
+  /* Read file line by line */
   while ((read = getline(&line, &len, file)) != -1) {
     buffer_ensure_capacity(&ed->buffer, ed->buffer.num_lines + 1);
 
+    /* Remove trailing newline */
     line[strcspn(line, "\n")] = '\0';
     ed->buffer.lines[ed->buffer.num_lines] = strdup(line);
     ed->buffer.line_len[ed->buffer.num_lines] =
@@ -264,6 +265,7 @@ static int load_file(Editor *ed, const char *filename) {
     ed->buffer.num_lines++;
   }
 
+  /* Ensure there's at least one line in the buffer */
   if (ed->buffer.num_lines == 0) {
     buffer_ensure_capacity(&ed->buffer, 1);
     ed->buffer.lines[0] = strdup("");
@@ -284,6 +286,7 @@ int main(int argc, char *argv[]) {
   if (!load_file(&ed, argv[1]))
     return 1;
 
+  /* Initialize ncurses */
   initscr();
   raw(); /* Use raw() instead of cbreak() to capture all control characters */
   noecho();
@@ -291,8 +294,9 @@ int main(int argc, char *argv[]) {
 
   redraw(&ed);
 
+  /* Main event loop */
   int ch;
-  while ((ch = getch()) != 27) {
+  while ((ch = getch()) != 27) { /* 27 = Escape key */
     switch (ch) {
     case 19: /* Ctrl+S */
     case 23: /* Ctrl+W - alternative save key */
@@ -316,7 +320,7 @@ int main(int argc, char *argv[]) {
       ed.cursor.cx++;
       break;
     case KEY_BACKSPACE:
-    case 127:
+    case 127: /* Backspace on some terminals */
       backspace(&ed);
       break;
     case KEY_DC:
@@ -327,15 +331,19 @@ int main(int argc, char *argv[]) {
       insert_newline(&ed);
       break;
     default:
+      /* Insert printable ASCII characters (space to tilde) */
       if (ch >= 32 && ch <= 126)
         insert_char(&ed, ch);
       break;
     }
 
+    /* Ensure cursor stays in valid bounds and adjust viewport */
     clamp_cursor(&ed);
+    /* Refresh display with current state */
     redraw(&ed);
   }
 
+  /* Clean up and exit */
   endwin();
   buffer_free(&ed.buffer);
   return 0;
