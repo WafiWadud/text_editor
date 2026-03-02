@@ -278,9 +278,23 @@ static int load_file(Editor *ed, const char *filename) {
   return 1;
 }
 
+static inline void usage(const char *prog) {
+  fprintf(stderr, "Usage: %s <filename>\n", prog);
+  fprintf(stderr, "A simple text editor using ncurses.\n");
+  fprintf(stderr, "Key bindings:\n");
+  fprintf(stderr, "  Arrow keys: Move cursor\n");
+  fprintf(stderr, "  Backspace (delete in front of cursor) / Delete (delete "
+                  "behind cursor): Delete characters\n");
+  fprintf(stderr, "  Enter: Insert newline\n");
+  fprintf(stderr, "  Ctrl+S / Ctrl+W: Save file\n");
+  fprintf(stderr, "  Escape: Exit editor\n");
+}
+
 int main(int argc, char *argv[]) {
-  if (argc < 2)
+  if (argc < 2) {
+    usage(argv[0]);
     return 1;
+  }
 
   Editor ed = {0};
   if (!load_file(&ed, argv[1]))
