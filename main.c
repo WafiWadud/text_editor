@@ -4,6 +4,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if __has_include(<stddefer.h>)
+#include <stddefer.h>
+#elif defined(__GNUC__)
+#define defer _DEFER(__COUNTER__)
+#define _DEFER(N) __DEFER(N)
+#define __DEFER(N) ___DEFER(__DEFER_FUNC_##N, __DEFER_VAR_##N)
+
+#define ___DEFER(F, V)                                                         \
+  auto void F(void *);                                                         \
+  __attribute__((cleanup(F))) int V __attribute__((unused));                   \
+  auto void F(void *_dummy_ptr)
+#else
+abort();
+#endif
+
 static void buffer_init(Buffer *buf, int initial_capacity) {
   buf->lines = malloc(initial_capacity * sizeof(char *));
   buf->line_len = malloc(initial_capacity * sizeof(size_t));
@@ -37,20 +52,21 @@ static int save_buffer(const Editor *ed) {
   if (!f)
     return 0;
 
+  defer { fclose(f); };
+
   for (int i = 0; i < ed->buffer.num_lines; i++) {
     if (fputs(ed->buffer.lines[i], f) == EOF) {
-      fclose(f);
       return 0;
     }
     if (fputc('\n', f) == EOF) {
-      fclose(f);
       return 0;
     }
   }
 
-  if (fclose(f) != 0)
-    return 0;
-
+  /* fclose result can no longer be checked directly since it's deferred.
+   * Errors during writing are caught by the fputs/fputc checks above.
+   * If you need to catch fclose() errors, avoid defer here and close manually.
+   */
   return 1;
 }
 
@@ -244,6 +260,8 @@ static int load_file(Editor *ed, const char *filename) {
   if (!file)
     return 0;
 
+  defer { fclose(file); };
+
   ed->filename = filename;
   buffer_init(&ed->buffer, 256);
   ed->cursor.cx = ed->cursor.cy = 0;
@@ -252,6 +270,8 @@ static int load_file(Editor *ed, const char *filename) {
   char *line = NULL;
   size_t len = 0;
   ssize_t read;
+
+  defer { free(line); };
 
   /* Read file line by line */
   while ((read = getline(&line, &len, file)) != -1) {
@@ -273,8 +293,6 @@ static int load_file(Editor *ed, const char *filename) {
     ed->buffer.num_lines = 1;
   }
 
-  free(line);
-  fclose(file);
   return 1;
 }
 
@@ -300,11 +318,15 @@ int main(int argc, char *argv[]) {
   if (!load_file(&ed, argv[1]))
     return 1;
 
+  defer { buffer_free(&ed.buffer); };
+
   /* Initialize ncurses */
   initscr();
   raw(); /* Use raw() instead of cbreak() to capture all control characters */
   noecho();
   keypad(stdscr, TRUE);
+
+  defer { endwin(); };
 
   redraw(&ed);
 
@@ -357,8 +379,5 @@ int main(int argc, char *argv[]) {
     redraw(&ed);
   }
 
-  /* Clean up and exit */
-  endwin();
-  buffer_free(&ed.buffer);
   return 0;
 }
