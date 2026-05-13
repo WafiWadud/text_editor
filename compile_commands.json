@@ -1,0 +1,33 @@
+[
+  {
+    "file": "main.c",
+    "arguments": [
+      "/usr/bin/clang",
+      "-Wall",
+      "-Wextra",
+      "-Wpedantic",
+      "-pedantic",
+      "-O3",
+      "-march=native",
+      "-mtune=native",
+      "-fdefer-ts",
+      "-flto",
+      "-ffast-math",
+      "-fno-ident",
+      "-fno-asynchronous-unwind-tables",
+      "-fno-stack-protector",
+      "-funroll-loops",
+      "-fomit-frame-pointer",
+      "-ffunction-sections",
+      "-fdata-sections",
+      "-ffreestanding",
+      "-fno-exceptions",
+      "main.c",
+      "-o",
+      "main",
+      "-ferror-limit=10000000"
+    ],
+    "directory": "/home/wafi/coding/text_editor",
+    "output": "main"
+  }
+]

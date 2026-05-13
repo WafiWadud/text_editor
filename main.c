@@ -20,8 +20,8 @@ abort();
 #endif
 
 static void buffer_init(Buffer *buf, int initial_capacity) {
-  buf->lines = malloc(initial_capacity * sizeof(char *));
-  buf->line_len = malloc(initial_capacity * sizeof(size_t));
+  buf->lines = (char **)malloc(initial_capacity * sizeof(char *));
+  buf->line_len = (size_t *)malloc(initial_capacity * sizeof(size_t));
   buf->num_lines = 0;
   buf->capacity = initial_capacity;
 }
@@ -34,8 +34,9 @@ static void buffer_ensure_capacity(Buffer *buf, int required) {
   while (new_capacity < required)
     new_capacity *= 2;
 
-  buf->lines = realloc(buf->lines, new_capacity * sizeof(char *));
-  buf->line_len = realloc(buf->line_len, new_capacity * sizeof(size_t));
+  buf->lines = (char **)realloc(buf->lines, new_capacity * sizeof(char *));
+  buf->line_len =
+      (size_t *)realloc(buf->line_len, new_capacity * sizeof(size_t));
   buf->capacity = new_capacity;
 }
 
